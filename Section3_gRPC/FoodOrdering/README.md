@@ -1,3 +1,4 @@
+
 # Section 3 - Problem 2: Food Ordering System using gRPC
 
 Team 32 - Nityanand Gupta (2024101147), A V Aditya (2024111031)
@@ -103,7 +104,7 @@ All 18 checks pass:
 
 ## Running on the RCE cluster
 
-Verified on `rce.iiit.ac.in` under account `cs3401.32`:
+Verified on the RCE cluster (`rce.iiit.ac.in`):
 
 - Login node Python is 3.6.8 (too old); use `module load python/3.12.5`.
 - The `gRPC` module (`module load gRPC/1.74.1`) is the **C++** gRPC
@@ -145,8 +146,8 @@ python3 restaurant.py node01:50051 "Pizza House"
 
 ### Verified on the actual RCE cluster
 
-Two things were actually executed on `rce.iiit.ac.in` (account `cs3401.32`),
-not just tested locally:
+Two things were actually executed on the RCE cluster, not just tested
+locally:
 
 1. **`test_food_ordering.py`** (all 18 automated checks) run inside a
    `salloc` allocation with `module load python/3.12.5` - all passed on

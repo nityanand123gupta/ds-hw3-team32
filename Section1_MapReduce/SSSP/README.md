@@ -72,7 +72,7 @@ Unreachable nodes are correctly reported as `INF`
 ## Running on the RCE SLURM cluster
 
 ```bash
-ssh cs3401.32@rce.iiit.ac.in
+ssh <username>@rce.iiit.ac.in
 cd ~/HW3/Section1_MapReduce/SSSP
 sbatch run_sssp_distributed.sh test_data/large_graph.txt
 ```
@@ -88,7 +88,7 @@ report's performance section.
 ### Verified on the actual RCE cluster
 
 Both runs below were executed for real via `salloc` + `run_sssp_distributed.sh`
-on `rce.iiit.ac.in` under account `cs3401.32` (not just locally):
+on the RCE SLURM cluster (not just locally):
 
 - **Sample graph (V=4)**, 2 nodes/tasks (`node06`,`node07`): completed in
   3 rounds, output `0 0 / 1 3 / 2 2 / 3 7` - exact match with the
