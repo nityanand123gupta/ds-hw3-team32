@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package loganalytics;
+
+// ============================================================
+// Real-Time Server Log Analytics over gRPC
+// Section 2 - Q2 (Team 32)
+// ============================================================
+service LogAnalyticsService {
+  // Client-streaming ingestion: the streaming client sends one LogRecord per
+  // request, replaying a pre-generated dataset as if it were a live feed.
+  // The server returns a single summary once the client closes the stream.
+  rpc StreamLogs(stream LogRecord) returns (IngestSummary);
+
+  // Query the current (possibly still-ingesting) analytics snapshot.
+  rpc GetAnalytics(Empty) returns (AnalyticsSnapshot);
+
+  // Clears all accumulated state (used between correctness test runs).
+  rpc Reset(Empty) returns (Ack);
+}
+
+message Empty {}
+
+message Ack {
+  bool success = 1;
+  string message = 2;
+}
+
+message LogRecord {
+  int64 timestamp = 1;
+  int32 server_id = 2;
+  int32 endpoint_id = 3;
+  int32 user_id = 4;
+  int32 status_code = 5;
+  double response_time = 6;
+  int64 bytes_sent = 7;
+}
+
+message IngestSummary {
+  int64 records_ingested = 1;
+}
+
+message ServerRow {
+  int32 server_id = 1;
+  int64 request_count = 2;
+  double average_response_time = 3;
+}
+
+message EndpointRow {
+  int32 endpoint_id = 1;
+  int64 request_count = 2;
+  int64 total_bytes = 3;
+}
+
+message AnalyticsSnapshot {
+  int64 records_ingested = 1;   // running count, useful for the live dashboard
+  int64 total_requests = 2;
+  int64 successful_requests = 3;
+  int64 failed_requests = 4;
+  double average_response_time = 5;
+  double min_response_time = 6;
+  double max_response_time = 7;
+  int64 total_bytes = 8;
+  int64 status_2xx = 9;
+  int64 status_3xx = 10;
+  int64 status_4xx = 11;
+  int64 status_5xx = 12;
+  int64 busiest_interval_id = 13;
+  int64 busiest_interval_count = 14;
+  repeated ServerRow top_servers = 15;
+  repeated EndpointRow top_endpoints = 16;
+}
