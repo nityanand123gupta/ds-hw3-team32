@@ -138,6 +138,19 @@ def main():
             pdf.ln(2)
             continue
 
+        img_match = re.match(r"^!\[[^\]]*\]\(([^)]+)\)$", line.strip())
+        if img_match:
+            path = img_match.group(1)
+            try:
+                page_w = pdf.w - pdf.l_margin - pdf.r_margin
+                pdf.set_x(pdf.l_margin)
+                pdf.image(path, w=page_w)
+                pdf.ln(2)
+            except Exception as e:
+                pdf.set_x(pdf.l_margin)
+                pdf.multi_cell(0, 5.5, f"[image could not be embedded: {path}]")
+            continue
+
         if line.startswith("# "):
             pdf.set_font("Helvetica", "B", 18)
             pdf.multi_cell(0, 10, clean_inline(line[2:]))

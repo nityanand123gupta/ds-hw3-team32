@@ -104,6 +104,48 @@ This confirms the pipeline genuinely runs across multiple SLURM-allocated
 compute nodes (mapper/combiner stages executed via `srun` on separate
 nodes), not just as a local simulation.
 
+## Scaling study: execution time, speedup, efficiency
+
+Same fixed dataset (V=1500, E=5000, `test_data/large_graph.txt`) run at
+1, 2, 4, and 6 SLURM nodes/tasks, each via
+`salloc --nodes=N --ntasks=N bash run_sssp_distributed.sh test_data/large_graph.txt`.
+"MapReduce time" is the sum of the `total_time_s` column across all 14
+convergence rounds (i.e. actual mapper+shuffle+combiner+shuffle+reducer
+work), excluding SLURM queue/allocation overhead; raw per-run data is in
+`test_data/scaling_summary.csv` (regenerate the plot with
+`python3 test_data/plot_scaling.py`).
+
+| Nodes (N) | MapReduce time (s) | Speedup (T1/TN) | Efficiency (Speedup/N) |
+|---|---|---|---|
+| 1 | 2.847 | 1.000 | 1.000 |
+| 2 | 7.418 | 0.384 | 0.192 |
+| 4 | 8.205 | 0.347 | 0.087 |
+| 6 | 8.201 | 0.347 | 0.058 |
+
+![Speedup and efficiency vs node count](test_data/scaling_plot.png)
+
+**Analysis - why this doesn't speed up (communication vs. computation):**
+at V=1500/E=5000, each round's actual per-record work (parsing a state
+line, relaxing a handful of edges, taking a min) is on the order of
+microseconds. Each round's wall time is instead dominated by `srun`
+process-launch and task-coordination overhead - launching N tasks,
+having them each open/read/write their chunk files, and rejoining for
+the central sort. That per-round coordination cost **grows** with N
+(more tasks to spawn and synchronize), while the useful work per task
+**shrinks** with N (each task handles a smaller slice of a
+constant-size problem). This is a textbook case of Amdahl's-law-style
+overhead: the parallel portion of the work is far smaller than the fixed
+per-round coordination cost at this problem size, so adding nodes makes
+the round slower, not faster - hence efficiency well below 1 and falling
+as N grows. This is a fixed-cost-per-round approach: it is not that
+MapReduce itself is unsuitable, but that this problem size is far too
+small for `srun`-per-round orchestration to pay for itself. It would be
+expected to amortize better either with a much larger graph (so
+per-task compute dominates the fixed launch cost) or with a real
+long-lived MapReduce runtime (e.g. actual Hadoop, where worker JVMs
+persist across the job instead of being re-spawned by `srun` every
+round).
+
 ## Generating benchmark datasets
 
 ```bash

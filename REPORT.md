@@ -28,27 +28,22 @@ By the Bellman-Ford theorem, after `V-1` rounds every shortest path (at most `V-
 
 **Correctness**: matches the assignment's sample (V=4) exactly, and matches a reference Dijkstra implementation on generated graphs up to V=1500.
 
-**Verified on RCE (real distributed runs, not local simulation):**
+**Verified on RCE (real distributed runs, not local simulation):** sample graph (V=4) on 2 nodes converged in 3 rounds with an exact output match; a generated graph (V=1500, E=5000) on 4 nodes converged in 14 rounds (of a possible 1499) with all 1500 distances matching reference Dijkstra.
 
-| Run | Nodes used | Rounds | Result |
+**Scaling study - execution time, speedup, efficiency** (same V=1500/E=5000 dataset, run at 1/2/4/6 SLURM nodes; time = sum of per-round mapper+shuffle+combiner+shuffle+reducer time across all 14 rounds, excluding SLURM queue overhead):
+
+| Nodes | MapReduce time (s) | Speedup | Efficiency |
 |---|---|---|---|
-| Sample graph (V=4) | 2 nodes | 3 | Exact match: 0 0 / 1 3 / 2 2 / 3 7 |
-| Generated graph (V=1500, E=5000) | 4 nodes | 14 (of 1499 max) | All 1500 distances match reference Dijkstra |
+| 1 | 2.847 | 1.000 | 1.000 |
+| 2 | 7.418 | 0.384 | 0.192 |
+| 4 | 8.205 | 0.347 | 0.087 |
+| 6 | 8.201 | 0.347 | 0.058 |
 
-Per-round timing breakdown for the 4-node/V=1500 run (seconds):
+![SSSP MapReduce speedup and efficiency vs node count](Section1_MapReduce/SSSP/test_data/scaling_plot.png)
 
-```
-round  mapper   shuffle1  combiner  shuffle2  reducer   total
-1      0.2063   0.1709    0.1940    0.0026    0.0155    0.6014
-2      0.2010   0.1710    0.1881    0.0031    0.0156    0.5912
-3      0.1772   0.1683    0.1822    0.0029    0.0158    0.5584
-...    (converges to a stable ~0.58s/round)
-14     0.1890   0.1684    0.1871    0.0047    0.0177    0.5787
-```
+**Analysis (communication vs. computation)**: at this problem size, each round's actual per-record work (parse a line, relax a few edges, take a min) is microseconds; round time is instead dominated by `srun` process-launch and task-coordination overhead. That coordination cost grows with node count while the useful work per task shrinks (a fixed-size problem split into more, smaller pieces), so speedup and efficiency fall well below the ideal linear line and keep falling as N increases. This is not a MapReduce-vs-not-MapReduce problem - it's that per-round `srun`-based orchestration re-spawns tasks every round, and that fixed cost dwarfs the actual compute at V=1500. It would be expected to amortize better on much larger graphs, or with a persistent-worker runtime (real Hadoop, where the JVMs stay alive across the job) instead of respawning tasks via `srun` each round.
 
-**Observation**: per-round time is dominated by `srun` task-launch and process-spawn overhead (mapper + shuffle1 + combiner together account for ~0.55s of the ~0.58s total), not by actual computation, since the per-record work is trivial at this scale. The global shuffle/reduce stage is comparatively cheap since it runs on a single node. This means the iterative-MapReduce-over-SLURM approach has a fairly high fixed cost per round; it would amortize better on graphs large enough that per-round compute dominates the launch overhead.
-
-**Deliverables**: `Section1_MapReduce/SSSP/` (mapper/combiner/reducer, local and SLURM-distributed drivers, dataset generator, correctness checker against Dijkstra, README).
+**Deliverables**: `Section1_MapReduce/SSSP/` (mapper/combiner/reducer, local and SLURM-distributed drivers, dataset generator, correctness checker against Dijkstra, scaling study + plot, README).
 
 ---
 
@@ -141,7 +136,7 @@ Client node: node07
 
 | # | Section | Implementation | Correctness | RCE Status |
 |---|---|---|---|---|
-| 1 | Sec 1 Q2 | SSSP - iterative MapReduce | Matches sample + Dijkstra to V=1500 | Verified: 2-node and 4-node runs |
+| 1 | Sec 1 Q2 | SSSP - iterative MapReduce | Matches sample + Dijkstra to V=1500 | Verified: 1/2/4/6-node scaling study |
 | 2 | Sec 2 Q1 | Server Log Analytics - Hadoop Streaming | Matches HW2 reference at 10 and 50k records | Blocked by Hadoop/YARN outage; code ready |
 | 3 | Sec 2 Q2 | Server Log Analytics - gRPC streaming | 5/5 checks, incl. concurrent ingest+query | Verified: 3-node run |
 | 4 | Sec 3 | Food Ordering - gRPC | 18/18 checks | Verified: cross-node run |

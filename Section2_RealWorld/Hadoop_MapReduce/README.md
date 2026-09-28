@@ -6,6 +6,11 @@ Continues the HW2 Q7 "Large-Scale Server Log Analytics" problem (see
 `../../HW2_reference` for the original problem statement, sequential and
 MPI implementations), now re-implemented as a Hadoop Streaming job.
 
+Note on the Hadoop version: the assignment specifies Apache Hadoop 3.3.6,
+but RCE has 3.3.0 installed. Course staff confirmed on the forum that
+using the installed 3.3.0 is acceptable, so that is what this
+implementation targets.
+
 ## Design
 
 Two MapReduce stages, matching the assignment's "no prescribed
