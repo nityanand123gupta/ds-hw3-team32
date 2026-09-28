@@ -94,7 +94,8 @@ def main():
             pdf.set_font("Courier", size=8)
             pdf.set_fill_color(240, 240, 240)
             text = "\n".join(code_buf)
-            pdf.multi_cell(0, 4, text, fill=True)
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(pdf.w - pdf.l_margin - pdf.r_margin, 4, text, fill=True)
             pdf.ln(2)
             pdf.set_font("Helvetica", size=10.5)
             code_buf = []
@@ -106,7 +107,12 @@ def main():
             for line in table_buf:
                 if re.match(r"^\|?\s*-+\s*(\|\s*-+\s*)*\|?$", line):
                     continue
-                cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                # protect escaped pipes ("\|", used for literal | inside a
+                # cell) from the column split, then restore them
+                placeholder = "\x00"
+                protected = line.replace("\\|", placeholder)
+                cells = [c.strip().replace(placeholder, "|")
+                         for c in protected.strip().strip("|").split("|")]
                 rows.append(cells)
             if rows:
                 render_table(pdf, rows)
@@ -152,17 +158,20 @@ def main():
             continue
 
         if line.startswith("# "):
+            pdf.set_x(pdf.l_margin)
             pdf.set_font("Helvetica", "B", 18)
             pdf.multi_cell(0, 10, clean_inline(line[2:]))
             pdf.set_font("Helvetica", size=10.5)
             pdf.ln(1)
         elif line.startswith("## "):
             pdf.ln(2)
+            pdf.set_x(pdf.l_margin)
             pdf.set_font("Helvetica", "B", 14)
             pdf.multi_cell(0, 8, clean_inline(line[3:]))
             pdf.set_font("Helvetica", size=10.5)
         elif line.startswith("### "):
             pdf.ln(1)
+            pdf.set_x(pdf.l_margin)
             pdf.set_font("Helvetica", "B", 11.5)
             pdf.multi_cell(0, 7, clean_inline(line[4:]))
             pdf.set_font("Helvetica", size=10.5)

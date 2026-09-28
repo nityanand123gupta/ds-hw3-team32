@@ -117,10 +117,10 @@ work), excluding SLURM queue/allocation overhead; raw per-run data is in
 
 | Nodes (N) | MapReduce time (s) | Speedup (T1/TN) | Efficiency (Speedup/N) |
 |---|---|---|---|
-| 1 | 2.847 | 1.000 | 1.000 |
-| 2 | 7.418 | 0.384 | 0.192 |
-| 4 | 8.205 | 0.347 | 0.087 |
-| 6 | 8.201 | 0.347 | 0.058 |
+| 1 | 2.920 | 1.000 | 1.000 |
+| 2 | 7.508 | 0.389 | 0.194 |
+| 4 | 8.465 | 0.345 | 0.086 |
+| 6 | 8.375 | 0.349 | 0.058 |
 
 ![Speedup and efficiency vs node count](test_data/scaling_plot.png)
 

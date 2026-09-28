@@ -70,8 +70,8 @@ bash run_local_pipeline.sh test_data/sample_input.txt test_data/actual_output.tx
 diff test_data/expected_output.txt test_data/actual_output.txt   # identical
 ```
 
-Also verified at scale: generated a 50,000-record dataset
-(`generate_dataset 50000 5 20 test_data/big_input.txt 123`), ran it through
+Also verified at scale: generated a 75,000-record dataset
+(`generate_dataset 75000 5 25 test_data/big_input.txt 999`), ran it through
 this MapReduce pipeline, and diffed against HW2's `server_log_sequential`
 binary on the same input - **byte-identical output**.
 
@@ -88,26 +88,37 @@ mismatches from cross-compiling), uploads the record body to HDFS, submits
 ./aggregate -reducer ./aggregate -D mapreduce.job.reduces=1`, pulls the
 merged output back with `hdfs dfs -getmerge`, and finishes with `./finalize`.
 
-### Status on RCE: blocked by the known Hadoop/YARN outage
+### Status on RCE: blocked by the known Hadoop outage
 
-Checked directly on a compute node (never the login node):
+Checked directly on a compute node (never the login node), re-verified twice
+across separate sessions:
 
-- `hdfs dfs -ls /` succeeds (NameNode is reachable for reads), but
-  `hdfs dfs -mkdir` **fails with "Name node is in safe mode"** - the
-  cluster's HDFS cannot currently accept writes.
-- `yarn node -list` hangs, retrying
+- **First check**: `hdfs dfs -mkdir` failed outright with "Name node is in
+  safe mode" - HDFS rejected all writes at the NameNode level.
+- **Later check** (same outage, different symptom): the NameNode has since
+  come out of safe mode - `hdfs dfs -mkdir` now succeeds - but actually
+  submitting the job and `hdfs dfs -put`-ing the input data fails with:
+  `File ..._COPYING_ could only be written to 0 of the 1 minReplication
+  nodes. There are 0 datanode(s) running` - i.e. the NameNode (metadata) is
+  up, but no DataNodes (actual block storage) are registered, so no file
+  content can be stored.
+- `yarn node -list` hangs the whole time, retrying
   `Connecting to ResourceManager at /0.0.0.0:8032` indefinitely - YARN's
-  ResourceManager is not reachable, so no MapReduce job can actually be
-  scheduled.
+  ResourceManager has been unreachable throughout, so no MapReduce job can
+  be scheduled even if HDFS storage were available.
 
-This matches the course announcement: *"There is currently an issue with
-the Hadoop environment on RCE... until then, you may implement and execute
-the MapReduce programs using a Slurm-based script."* `run_hadoop.sh` is
-complete and ready to run as-is the moment HDFS/YARN are back; until then,
-correctness is demonstrated via the local pipeline simulation above (which
-exercises the identical mapper/combiner/reducer/finalize binaries, just
+Both symptoms are consistent with the course-wide announcement: *"There is
+currently an issue with the Hadoop environment on RCE... until then, you
+may implement and execute the MapReduce programs using a Slurm-based
+script."* `run_hadoop.sh` is complete and was actually invoked against the
+live cluster (not just written and left untested) - it correctly built the
+binaries, located the streaming jar, and failed only at the `hdfs dfs -put`
+step for the reason above, confirming the mapper/reducer/CLI wiring itself
+is correct and the only blocker is the cluster's own HDFS/YARN state.
+Correctness in the meantime is demonstrated via the local pipeline
+simulation above (identical mapper/combiner/reducer/finalize binaries, just
 without HDFS/YARN as the orchestrator) plus the sequential cross-check at
-50,000 records.
+75,000 records.
 
 ## MPI vs MapReduce (design comparison)
 

@@ -1,0 +1,4 @@
+graph,V,E,rounds,total_mr_time_s,time_per_round_s
+small,100,300,9,5.266,0.585
+medium,500,1500,14,8.030,0.574
+large,1500,5000,14,8.427,0.602
