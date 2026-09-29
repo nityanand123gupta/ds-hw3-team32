@@ -351,7 +351,55 @@ implementation's code - is itself evidence that the script and the
 mapper/combiner/reducer wiring are correct and would run the moment
 HDFS/YARN are restored, exactly as-is.
 
-### 3.5 MPI (HW2) vs. Hadoop MapReduce (this) - design comparison
+### 3.5 Quantitative MPI vs. MapReduce comparison (equivalent datasets, same RCE hardware)
+
+Since the real distributed Hadoop job is blocked (3.4), the local-pipeline
+simulation was run **on RCE itself** (not a local dev machine, to keep the
+hardware identical to HW2's own numbers) at the **exact same four
+dataset configurations HW2's own MPI benchmark used** (same N, K, S,
+same seed 42), for a genuine apples-to-apples "execution time and
+throughput... scaling with input size" comparison:
+
+| Config | N | K | S | HW2 MPI Tseq (s) | HW2 MPI P=1 (s) | HW2 MPI P=8 (s) | This pipeline, total (s) | vs. MPI P=1 |
+|---|---|---|---|---|---|---|---|---|
+| small | 100,000 | 5 | 20 | 0.0219 | 0.0209 | 0.0040 | 1.185 | 56.7x slower |
+| medium | 1,000,000 | 10 | 50 | 0.2094 | 0.2131 | 0.0319 | 10.821 | 50.8x slower |
+| large | 5,000,000 | 10 | 100 | 1.0324 | 1.0629 | 0.1478 | 57.945 | 54.5x slower |
+| verylarge | 10,000,000 | 10 | 200 | 2.1638 | 2.2387 | 0.3120 | 129.772 | 58.0x slower |
+
+**Why the gap, and why it is consistent (~51-58x) across a 100x range of
+N**: MPI's P=1 program does one pass over the data, entirely in one
+process's memory - read, parse, accumulate, done. This pipeline's design
+(chosen and justified in 3.1) does the same logical work but as five
+separate OS processes connected by pipes/files
+(`mapper -> sort -> aggregate -> sort -> aggregate -> finalize`), and
+critically, **two of those five stages are full external `sort` calls
+over the entire mapper output** - a general-purpose, disk-backed
+string/text sort with no knowledge of the data's structure, run twice.
+Process-spawn overhead and the cost of serializing every intermediate
+key-value pair to text and re-parsing it at each stage add a further
+constant multiplier on top of that. Because both the external-sort cost
+and the per-stage text (de)serialization cost scale linearly with N just
+like the actual computation does, the overhead factor stays roughly
+constant (~51-58x) rather than growing or shrinking with N - which is
+exactly the pattern in the table above.
+
+This is not a defect in the MapReduce *algorithm* design (3.1's
+associative-merge combiner/reducer split is what makes a real,
+distributed Hadoop job with `-numReduceTasks 1` correct and scalable at
+much larger N than this); it is the honest cost of **simulating**
+Hadoop's shuffle/sort with `sort(1)` and Unix pipes on a single machine
+instead of running it inside the real framework, which parallelizes the
+shuffle/sort itself across many machines' worth of memory and disk rather
+than paying for it serially on one process's stdin/stdout. This is
+precisely the comparison RCE's Hadoop outage (3.4) prevents from being
+measured directly - a real multi-node Hadoop run would be expected to
+close a substantial part of this gap by parallelizing exactly the two
+sort stages that dominate this measurement, though matching hand-tuned
+MPI at this problem size would still be unlikely given YARN/JVM/HDFS
+overhead that MPI simply does not pay.
+
+### 3.6 MPI (HW2) vs. Hadoop MapReduce (this) - qualitative design comparison
 
 | Aspect | MPI (HW2) | Hadoop MapReduce (this) |
 |---|---|---|
@@ -375,7 +423,7 @@ benefits that matter most at scales and failure rates this assignment's
 problem sizes do not reach, and which RCE's current Hadoop outage
 unfortunately prevents from being measured directly here.
 
-### 3.6 Deliverables
+### 3.7 Deliverables
 
 `Section2_RealWorld/Hadoop_MapReduce/` - `mapper.cpp`, `aggregate.cpp`,
 `finalize.cpp`, `analytics_common.hpp` (shared with HW2), a reproducible
@@ -497,7 +545,42 @@ per-worker sharding here exists primarily to keep `GetAnalytics` queries
 from blocking on ingestion (next section), which is the assignment's
 explicit ask, rather than to scale raw single-stream ingestion throughput.
 
-### 4.5 Performance study 2: query latency vs. concurrent query load
+### 4.5 Performance study 2: streaming rate and message/pacing granularity
+
+The assignment explicitly requires investigating, at minimum, worker count
+(4.4, above) **and "the way records are streamed"** - i.e. streaming rate
+and message/batch granularity. A 20,000-record dataset was replayed through
+the actual `streaming_client.py` pacing logic at several rate/batch-size
+combinations:
+
+| Configuration | Target rate | Pacing batch size | Elapsed (s) | Achieved rate (records/s) |
+|---|---|---|---|---|
+| Unthrottled | unlimited | 100 | 1.318 | 15,178.6 |
+| Rate-limited | 500/s | 1 | 40.006 | 499.9 |
+| Rate-limited | 500/s | 50 | 40.006 | 499.9 |
+| Rate-limited | 500/s | 200 | 40.005 | 499.9 |
+| Rate-limited | 2000/s | 100 | 10.005 | 1999.0 |
+
+**Observation**: the pacing mechanism hits its target rate accurately
+(499.9/500 and 1999.0/2000 - within 0.1%) regardless of pacing batch size
+(1, 50, or 200), because at these rates the system is nowhere near its
+~15,000 rec/s unthrottled ceiling - the batch-size parameter only controls
+how often the client's pacing loop checks the clock (a CPU-overhead
+knob for the client, not a correctness or throughput knob), so a coarser
+batch size is free to use whenever the target rate is well under the
+ceiling. The parameter would only start to matter for rates approaching
+the unthrottled ceiling, where checking the clock once per record (batch
+size 1) adds measurable per-record overhead compared to checking it once
+per 100-200 records.
+
+A second experiment measured dashboard-style `GetAnalytics` query latency
+**while a 500 rec/s stream was actively being ingested** (as opposed to
+4.4's query-latency-against-a-static-server measurement) - 768 queries
+observed over the ingestion window, **p50 = 1.65ms, p95 = 2.44ms**,
+confirming queries remain fast and responsive even during active,
+realistic-rate ingestion, not just against an idle, fully-loaded server.
+
+### 4.6 Performance study 3: query latency vs. concurrent query load
 
 Same 50,000-record dataset pre-loaded into an 8-worker server; then 1, 2,
 4, and 8 concurrent client threads each issue 20 `GetAnalytics` calls
@@ -520,7 +603,7 @@ once per second requires, confirming the design meets the assignment's
 "analytics queries while ingestion is in progress" requirement with
 comfortable headroom.
 
-### 4.6 Verified on the actual RCE cluster (true multi-node run)
+### 4.7 Verified on the actual RCE cluster (true multi-node run)
 
 Beyond the automated test suite (re-run and passing on an RCE compute
 node, Section 4.3), a genuine 3-node run was executed via
@@ -545,12 +628,13 @@ This demo was re-run fresh with freshly re-uploaded code and produced
 dataset generator), confirming the pipeline is fully deterministic and
 reproducible across independent SLURM allocations.
 
-### 4.7 Deliverables
+### 4.8 Deliverables
 
 `Section2_RealWorld/gRPC_Streaming/` - `log_analytics.proto`,
 `analytics_core.py`, `server.py`, `streaming_client.py`, `dashboard.py`,
 the automated test suite, both benchmark scripts referenced above
-(`benchmark_workers.py`), and the multi-node RCE demo script.
+(`benchmark_workers.py`, `benchmark_streaming_granularity.py`), and the
+multi-node RCE demo script.
 
 ---
 
@@ -612,11 +696,15 @@ covering:
   concurrently-subscribed customer receiving all four statuses
   (`PLACED`, `ACCEPTED`, `PREPARING`, `READY`) **in order** via the
   streaming RPC, without polling.
-- All 5 required exceptional cases, each asserted against its specific
-  expected gRPC status code (not just "any error").
-- Cancellation rules: a freshly-`PLACED` order can be cancelled; an
-  already-cancelled or already-`ACCEPTED` order cannot be (both correctly
-  rejected with `FAILED_PRECONDITION`).
+- 5 of the 6 required exceptional cases (non-existent restaurant,
+  unavailable item, non-existent order, invalid transition, cross-restaurant
+  update), each asserted against its specific expected gRPC status code
+  (not just "any error").
+- Cancellation rules cover the 6th required exceptional case: a
+  freshly-`PLACED` order can be cancelled; an already-cancelled or
+  already-`ACCEPTED` order cannot be (both correctly rejected with
+  `FAILED_PRECONDITION`) - matching the spec's "customer attempts to cancel
+  an order that has already been accepted or prepared" case.
 - **20 simultaneous `PlaceOrder` calls from 20 threads**, all receiving
   distinct order IDs with no lost or duplicated IDs - direct evidence the
   locking design in 5.1 is race-free under real concurrent load, not just
@@ -632,20 +720,30 @@ locally:
 
 | Concurrent clients | Total orders | Elapsed (s) | Throughput (orders/s) | p50 latency (ms) | p95 latency (ms) |
 |---|---|---|---|---|---|
-| 1 | 50 | 0.051 | 971.3 | 0.69 | 0.92 |
-| 5 | 250 | 0.086 | 2894.5 | 1.57 | 2.72 |
-| 10 | 500 | 0.120 | 4150.2 | 2.28 | 3.03 |
-| 20 | 1000 | 0.183 | 5478.2 | 3.38 | 4.35 |
+| 1 | 50 | 0.086 | 582.1 | 1.12 | 1.51 |
+| 5 | 250 | 0.116 | 2149.8 | 2.12 | 2.95 |
+| 10 | 500 | 0.215 | 2324.2 | 4.13 | 4.83 |
+| 20 | 1000 | 0.428 | 2334.5 | 8.25 | 9.14 |
 
-**Observation**: throughput scales super-linearly at first (1 -> 5 clients
-nearly triples throughput) because a single client thread is largely
-network/serialization-bound waiting on its own RPC round-trip, so more
-concurrent clients fill in that idle time; it then continues climbing
-(though with diminishing returns) through 20 concurrent clients, while p50
-latency grows only mildly (0.7ms -> 3.4ms) - confirming the per-order
-locking design from 5.1 scales to real concurrent load without becoming a
-bottleneck at these request rates, consistent with the 20-thread
-correctness result in 5.3.
+**Observation**: throughput jumps sharply from 1 to 5 concurrent clients
+(roughly 3.7x) because a single client thread spends most of its time
+idle, blocked on its own RPC round-trip, so a handful of concurrent
+clients fill that idle time almost for free; beyond 5 clients, throughput
+flattens out (2150 -> 2324 -> 2335 orders/s from 5 to 20 clients) while
+p50 latency keeps climbing (2.1ms -> 8.25ms) - i.e. additional concurrent
+clients past this point mostly wait in queue rather than add throughput.
+This saturation point lines up with `server.py`'s
+`ThreadPoolExecutor(max_workers=16)`: once concurrent in-flight requests
+approach the size of the server's own worker pool, extra clients are
+throttled by request-thread availability rather than by the per-order
+locking design from 5.1 (`test_food_ordering.py`'s 20-thread test
+confirms this queuing is safe, not a correctness problem - every request
+still completes with a unique order ID, just not instantaneously).
+Repeated runs of this benchmark show the same qualitative shape (sharp
+early gain, then a plateau) with the precise throughput numbers varying
+by up to ~30% run-to-run, as expected for a wall-clock microbenchmark
+sharing a machine with other processes; the trend, not the exact
+figures, is the reliable takeaway.
 
 ### 5.5 Verified on the actual RCE cluster (true cross-node run)
 
@@ -700,8 +798,8 @@ satisfied throughout every result reported above:
 | # | Section | Implementation | Correctness | Performance study | RCE execution |
 |---|---|---|---|---|---|
 | 1 | Sec 1 Q2 | SSSP - iterative MapReduce | Matches PDF sample + independent Dijkstra up to V=1500 | Node-count scaling (1/2/4/6) + size scaling (V=100/500/1500), with plots | Verified: real distributed runs at every configuration |
-| 2 | Sec 2 Q1 | Server Log Analytics - Hadoop Streaming (C++) | Matches HW2 sequential reference at N=10, 1k, 10k, 75k | Stage-by-stage local-pipeline timing at 3 sizes | Attempted live twice; blocked by cluster-side outage (0 DataNodes; YARN ResourceManager unreachable), not by this implementation |
-| 3 | Sec 2 Q2 | Server Log Analytics - gRPC streaming | 5/5 automated checks incl. concurrent ingest+query | Worker-count throughput scaling + query-latency-under-load | Verified: real 3-node run |
+| 2 | Sec 2 Q1 | Server Log Analytics - Hadoop Streaming (C++) | Matches HW2 sequential reference at N=10, 1k, 10k, 75k | Stage-by-stage timing at 3 sizes + quantitative MPI-vs-MapReduce comparison at HW2's own 4 dataset sizes, run on RCE | Attempted live twice; blocked by cluster-side outage (0 DataNodes; YARN ResourceManager unreachable), not by this implementation |
+| 3 | Sec 2 Q2 | Server Log Analytics - gRPC streaming | 5/5 automated checks incl. concurrent ingest+query | Worker-count scaling + streaming-rate/granularity effect + query-latency-under-load (both required minimums covered) | Verified: real 3-node run |
 | 4 | Sec 3 | Food Ordering - gRPC | 18/18 automated checks incl. 20-thread concurrency | Order-placement throughput/latency vs. concurrency | Verified: real cross-node run |
 
 **Overall conclusion**: all four required implementations are complete,

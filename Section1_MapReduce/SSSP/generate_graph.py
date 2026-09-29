@@ -35,6 +35,11 @@ def main():
         edges.append((u, v, w))
         connected.append(v)
 
+    if E < len(edges):
+        print(f"note: requested E={E} is below the {len(edges)} edges needed "
+              f"for a spanning structure guaranteeing reachability; "
+              f"emitting {len(edges)} edges instead", file=sys.stderr)
+
     # Extra random edges up to E.
     while len(edges) < E:
         u = rng.randint(0, V - 1)

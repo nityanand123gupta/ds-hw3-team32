@@ -97,14 +97,31 @@ on the RCE SLURM cluster (not just locally):
   (`node01-03,node06`): converged in 14 rounds (well under the
   `V-1=1499` worst-case bound); `verify_correctness.py` confirmed
   `PASS: all 1500 node distances match reference Dijkstra`.
-  Per-round timing breakdown saved in
-  `test_data/rce_dist_benchmark_summary.csv`.
+  Per-round timing breakdown saved in `test_data/scaling_summary.csv`
+  (see "Scaling study" below).
 
 This confirms the pipeline genuinely runs across multiple SLURM-allocated
 compute nodes (mapper/combiner stages executed via `srun` on separate
 nodes), not just as a local simulation.
 
-## Scaling study: execution time, speedup, efficiency
+## Scaling study: problem size (fixed at 4 nodes)
+
+Same node count (4), varying graph size, each run for real on RCE via
+`salloc --nodes=4 --ntasks=4 bash run_sssp_distributed.sh`. Raw data in
+`test_data/size_scaling_summary.csv`.
+
+| Graph | V | E | Rounds | Total MapReduce time (s) | Time/round (s) |
+|---|---|---|---|---|---|
+| small | 100 | 300 | 9 | 5.266 | 0.585 |
+| medium | 500 | 1500 | 14 | 8.030 | 0.574 |
+| large | 1500 | 5000 | 14 | 8.427 | 0.602 |
+
+Time-per-round is nearly flat (0.57-0.60s) across a 15x increase in V and
+16.7x increase in E - confirming the node-count study's finding below
+that per-round cost is dominated by fixed `srun` coordination overhead,
+not data volume, at this problem scale.
+
+## Scaling study: execution time, speedup, efficiency (node count)
 
 Same fixed dataset (V=1500, E=5000, `test_data/large_graph.txt`) run at
 1, 2, 4, and 6 SLURM nodes/tasks, each via
