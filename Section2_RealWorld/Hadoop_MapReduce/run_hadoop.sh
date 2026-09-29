@@ -16,14 +16,14 @@ HDFS_DIR=${2:-/user/$USER/q7_server_log_analytics}
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "Building mapper/aggregate/finalize on this node's toolchain..."
+echo "Building mapper/aggregate/finalize on this node's toolchain..." >&2
 g++ -O2 -std=c++17 -o mapper mapper.cpp
 g++ -O2 -std=c++17 -o aggregate aggregate.cpp
 g++ -O2 -std=c++17 -o finalize finalize.cpp
 chmod +x mapper aggregate finalize
 
 read -r N K S < "$INPUT_FILE"
-echo "N=$N K=$K S=$S"
+echo "N=$N K=$K S=$S" >&2
 
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR"' EXIT
@@ -34,8 +34,12 @@ if [ -z "$HADOOP_STREAMING_JAR" ]; then
     echo "ERROR: could not locate hadoop-streaming*.jar. Is the hdfs/hadoop module loaded?"
     exit 1
 fi
-echo "Using streaming jar: $HADOOP_STREAMING_JAR"
+echo "Using streaming jar: $HADOOP_STREAMING_JAR" >&2
 
+# All Hadoop/HDFS job-progress chatter goes to stderr, so stdout carries
+# only the final analytics block (the spec forbids debugging output in the
+# required output).
+{
 hdfs dfs -mkdir -p "$HDFS_DIR/input"
 hdfs dfs -rm -f -r "$HDFS_DIR/output" 2>/dev/null || true
 hdfs dfs -put -f "$WORK_DIR/body.txt" "$HDFS_DIR/input/body.txt"
@@ -50,5 +54,6 @@ hadoop jar "$HADOOP_STREAMING_JAR" \
     -output "$HDFS_DIR/output"
 
 hdfs dfs -getmerge "$HDFS_DIR/output" "$WORK_DIR/aggregated.txt"
+} >&2
 
 ./finalize "$WORK_DIR/aggregated.txt" "$K" "$S"

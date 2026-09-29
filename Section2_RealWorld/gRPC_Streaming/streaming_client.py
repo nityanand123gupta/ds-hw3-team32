@@ -12,7 +12,6 @@ Usage:
                     reducing timer overhead at high rates (default 100)
 """
 import argparse
-import sys
 import time
 
 import grpc

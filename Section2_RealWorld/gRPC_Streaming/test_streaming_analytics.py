@@ -43,8 +43,8 @@ def check(name, condition):
         print(f"  [FAIL] {name}")
 
 
-def sequential_reference(path, K):
-    st = PartialStats()
+def sequential_reference(path, K, S):
+    st = PartialStats(S)
     for r in read_records(path):
         st.update(r.timestamp, r.server_id, r.endpoint_id, r.status_code,
                    r.response_time, r.bytes_sent)
@@ -114,6 +114,24 @@ def main():
         snap2 = stub.GetAnalytics(pb2.Empty())
         check("state cleared after Reset", snap2.total_requests == 0 and snap2.records_ingested == 0)
 
+        print("== server_id bounding (HW2 clarification: server_id must lie in [0, S-1]) ==")
+        # Records with an out-of-range server_id must still count towards
+        # global totals but must NOT appear in TOP_SERVERS, matching
+        # analytics_common.hpp's accumulate() on the C++/Hadoop side exactly.
+        stub.Reset(pb2.Empty())
+        stub.StreamLogs(iter([
+            pb2.LogRecord(timestamp=0, server_id=0, endpoint_id=0, user_id=0,
+                          status_code=200, response_time=1.0, bytes_sent=10),
+            pb2.LogRecord(timestamp=0, server_id=99, endpoint_id=0, user_id=0,
+                          status_code=200, response_time=1.0, bytes_sent=10),
+        ]))
+        snap_bound = stub.GetAnalytics(pb2.Empty())
+        check("out-of-range server_id still counted in TOTAL_REQUESTS",
+              snap_bound.total_requests == 2)
+        check("out-of-range server_id excluded from TOP_SERVERS",
+              all(row.server_id != 99 for row in snap_bound.top_servers))
+        stub.Reset(pb2.Empty())
+
         print("== Concurrent ingest + query on a larger generated stream ==")
         # Build a bigger synthetic dataset in-process (no need for the C++
         # generator here) and confirm querying mid-stream doesn't crash and
@@ -134,7 +152,7 @@ def main():
                 by = rng.randint(0, 20000)
                 f.write(f"{ts} {sid} {eid} {uid} {sc} {rt:.6f} {by}\n")
 
-        expected_big = sequential_reference(big_path, KB)
+        expected_big = sequential_reference(big_path, KB, SB)
 
         query_errors = []
 

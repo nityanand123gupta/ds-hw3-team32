@@ -29,9 +29,10 @@ from analytics_core import PartialStats, busiest_interval, top_endpoints, top_se
 
 
 class Worker:
-    def __init__(self):
+    def __init__(self, S: int):
+        self.S = S
         self.lock = threading.Lock()
-        self.stats = PartialStats()
+        self.stats = PartialStats(S)
 
     def ingest(self, r: pb2.LogRecord):
         with self.lock:
@@ -44,14 +45,14 @@ class Worker:
 
     def reset(self):
         with self.lock:
-            self.stats = PartialStats()
+            self.stats = PartialStats(self.S)
 
 
 class LogAnalyticsServicer(pb2_grpc.LogAnalyticsServiceServicer):
     def __init__(self, K: int, S: int, num_workers: int):
         self.K = K
         self.S = S
-        self.workers = [Worker() for _ in range(num_workers)]
+        self.workers = [Worker(S) for _ in range(num_workers)]
         self._rr_lock = threading.Lock()
         self._rr_counter = 0
         self.records_ingested = 0
@@ -76,7 +77,7 @@ class LogAnalyticsServicer(pb2_grpc.LogAnalyticsServiceServicer):
 
     # ---------------- GetAnalytics ----------------
     def GetAnalytics(self, request, context):
-        merged = PartialStats()
+        merged = PartialStats(self.S)
         for w in self.workers:
             w.merge_into(merged)
 

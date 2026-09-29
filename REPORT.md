@@ -498,7 +498,7 @@ which would need re-balancing logic this simpler design avoids entirely.
 
 ### 4.3 Correctness verification
 
-Automated test suite (`test_streaming_analytics.py`), **5/5 checks pass**:
+Automated test suite (`test_streaming_analytics.py`), **7/7 checks pass**:
 
 1. Streaming the assignment's exact sample dataset end-to-end and
    confirming the final `GetAnalytics` snapshot matches
@@ -506,7 +506,18 @@ Automated test suite (`test_streaming_analytics.py`), **5/5 checks pass**:
    Top-K ordering, same busiest-interval tie-break rule as Sections 2 and
    3, since all three share the same underlying arithmetic).
 2. `Reset` correctly zeroes every counter and clears every dict.
-3. A synthetic 20,000-record stream, ingested while a **second thread
+3. **`server_id` bounding**: HW2's clarification requires `server_id` to
+   lie in `[0, S-1]` to appear in per-server stats/`TOP_SERVERS`, while
+   still counting towards every global total if it doesn't - a rule
+   `analytics_common.hpp` on the C++/Hadoop side enforces (3.1) but which
+   an earlier version of `analytics_core.py` silently skipped, letting an
+   out-of-range `server_id` leak into `TOP_SERVERS` and making the `S`
+   argument functionally dead code. Fixed by threading `S` through
+   `PartialStats`, `Worker`, and the servicer so every accumulator honors
+   the same bound as the C++ side; a dedicated regression test now injects
+   an out-of-range `server_id` and asserts it is counted in
+   `TOTAL_REQUESTS` but excluded from `TOP_SERVERS`.
+4. A synthetic 20,000-record stream, ingested while a **second thread
    concurrently fires `GetAnalytics` queries in a tight loop for the
    entire duration of ingestion** - zero errors from any concurrent query,
    and the final snapshot (after ingestion completes) matches an
@@ -799,7 +810,7 @@ satisfied throughout every result reported above:
 |---|---|---|---|---|---|
 | 1 | Sec 1 Q2 | SSSP - iterative MapReduce | Matches PDF sample + independent Dijkstra up to V=1500 | Node-count scaling (1/2/4/6) + size scaling (V=100/500/1500), with plots | Verified: real distributed runs at every configuration |
 | 2 | Sec 2 Q1 | Server Log Analytics - Hadoop Streaming (C++) | Matches HW2 sequential reference at N=10, 1k, 10k, 75k | Stage-by-stage timing at 3 sizes + quantitative MPI-vs-MapReduce comparison at HW2's own 4 dataset sizes, run on RCE | Attempted live twice; blocked by cluster-side outage (0 DataNodes; YARN ResourceManager unreachable), not by this implementation |
-| 3 | Sec 2 Q2 | Server Log Analytics - gRPC streaming | 5/5 automated checks incl. concurrent ingest+query | Worker-count scaling + streaming-rate/granularity effect + query-latency-under-load (both required minimums covered) | Verified: real 3-node run |
+| 3 | Sec 2 Q2 | Server Log Analytics - gRPC streaming | 7/7 automated checks incl. concurrent ingest+query and server_id bounding | Worker-count scaling + streaming-rate/granularity effect + query-latency-under-load (both required minimums covered) | Verified: real 3-node run |
 | 4 | Sec 3 | Food Ordering - gRPC | 18/18 automated checks incl. 20-thread concurrency | Order-placement throughput/latency vs. concurrency | Verified: real cross-node run |
 
 **Overall conclusion**: all four required implementations are complete,

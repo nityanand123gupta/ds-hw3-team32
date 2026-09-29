@@ -17,10 +17,18 @@ class PartialStats:
         "total", "success", "failed",
         "sum_response_time", "min_response_time", "max_response_time",
         "total_bytes", "status2xx", "status3xx", "status4xx", "status5xx",
-        "servers", "endpoints", "intervals",
+        "servers", "endpoints", "intervals", "S",
     )
 
-    def __init__(self):
+    def __init__(self, S=None):
+        # S mirrors analytics_common.hpp's clarification: server_id must lie
+        # in [0, S-1] to appear in per-server stats / TOP_SERVERS. Records
+        # with an out-of-range server_id still count towards every global
+        # total, but are excluded from `servers` -- matching the C++/Hadoop
+        # side exactly (see analytics_common.hpp's accumulate()). S=None
+        # means "no bound" (accept any server_id), used only where the
+        # bound genuinely isn't known.
+        self.S = S
         self.total = 0
         self.success = 0
         self.failed = 0
@@ -61,12 +69,13 @@ class PartialStats:
         elif bucket == 5:
             self.status5xx += 1
 
-        srv = self.servers.get(server_id)
-        if srv is None:
-            self.servers[server_id] = [1, response_time]
-        else:
-            srv[0] += 1
-            srv[1] += response_time
+        if self.S is None or (0 <= server_id < self.S):
+            srv = self.servers.get(server_id)
+            if srv is None:
+                self.servers[server_id] = [1, response_time]
+            else:
+                srv[0] += 1
+                srv[1] += response_time
 
         ep = self.endpoints.get(endpoint_id)
         if ep is None:
